@@ -57,12 +57,30 @@ build fails if that number ever grows.
 No `mcmod.info`: this is a tweaker library, not a mod. Because it declares
 `TweakClass`, FML skips it as a "known library file" and never lists it as a mod.
 
+## Building
+
+```bash
+./tools/build-shim.sh                 # build + verify the three-class shape
+MC_1_12_2_FORGE_PATH=~/.prism/instances/1.12.2-forge/minecraft ./tools/build-shim.sh
+./tools/build-shim.sh --release       # + copy to RELEASE_DEPLOY_PATH
+```
+
+The script pins the build JVM to a JDK between 11 and 19. `options.release = 8`
+rules out JDK 8 (the flag is javac 9+), and Gradle 8.1.1 refuses to run on
+anything newer than 19, so 17 is the practical choice; the script finds one
+rather than making every caller remember. Override with `JAVA_HOME`.
+
+`gradle build` runs `verifyShimJar`, which fails the build if the jar carries
+anything but the three classes, an `org/` class other than the tweaker,
+`mcmod.info`, or a config/plugin manifest attribute.
+
 ## Status
 
-Design finalised, implementation not started. The design document lives in the
-mod repository:
+Implemented and measured. The design document and the matrix evidence live in
+the mod repository:
 
-`control-flex-1.12.2/docs/superpowers/specs/2026-11-16-mixin-tweaker-shim-split-design.md`
+- `control-flex-1.12.2/docs/superpowers/specs/2026-11-16-mixin-tweaker-shim-split-design.md`
+- `control-flex-1.12.2/docs/review/2026-11-16-mixin-shim-matrix.md`
 
 ## License
 
