@@ -182,6 +182,23 @@ public class MixinTweakShimTest {
     }
 
     @Test
+    @DisplayName("an engine with start() but no doInit(List) is a failure, not a silent no-op")
+    void missingDoInitIsRecordedAsFailure() {
+        MixinTweakShim.bindBootstrap(NoDoInitStubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+
+        assertEquals(TweakState.START_FAILED, MixinTweakShim.currentState(),
+                "falling back to init() here cannot work: init() is start() plus doInit(), and "
+                        + "start() was already consumed, so the second start() returns false");
+        assertTrue(MixinTweakShim.detail().contains("doInit"), "the screen has to name what is missing");
+        assertFalse(StubCalls.calls.contains("init"),
+                "init() must not be called at all -- it would look like success while doing nothing");
+        assertNull(MixinTweakShim.getLaunchTarget(LOADER), "no delegation happened, so no launch target");
+    }
+
+    @Test
     @DisplayName("the shadow class itself is the jar's TweakClass entry point")
     void shadowTweakerForwardsToTheShim() {
         MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());

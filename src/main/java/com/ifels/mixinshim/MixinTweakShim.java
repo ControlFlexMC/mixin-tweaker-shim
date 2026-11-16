@@ -83,6 +83,14 @@ public final class MixinTweakShim {
     /** True only once start() and doInit() both succeeded; gates inject()/getLaunchTarget(). */
     private static boolean delegated;
 
+    /**
+     * True when {@code start()} had to fall back to {@code init()} (an engine old enough to have
+     * neither {@code start()} nor {@code doInit(List)}). {@code init()} is {@code start()} plus
+     * {@code doInit()} in one call, so the follow-up {@code doInit()} must then be a no-op rather
+     * than a failure.
+     */
+    private static boolean initialisedByInitFallback;
+
     private MixinTweakShim() {
     }
 
@@ -98,6 +106,7 @@ public final class MixinTweakShim {
     static void resetForTest() {
         started = false;
         delegated = false;
+        initialisedByInitFallback = false;
         bootstrapClassName = BOOTSTRAP_CLASS;
         System.clearProperty(STATE_PROPERTY);
         System.clearProperty(DETAIL_PROPERTY);
@@ -373,6 +382,7 @@ public final class MixinTweakShim {
         Method method = findDeclared(bootstrap, "start");
         if (method == null) {
             init(bootstrap);
+            initialisedByInitFallback = true;
             return true;
         }
         Object result = method.invoke(null);
@@ -386,8 +396,14 @@ public final class MixinTweakShim {
     private static void doInit(Class<?> bootstrap, List<String> args) throws Throwable {
         Method method = findDeclared(bootstrap, "doInit", List.class);
         if (method == null) {
-            init(bootstrap);
-            return;
+            if (initialisedByInitFallback) {
+                return;
+            }
+            // Deliberately NOT init(): init() is start() + doInit(), and start() has already been
+            // consumed here, so its second start() call returns false and it returns immediately --
+            // a no-op that would be reported as a successful delegation while every mixin stayed dead.
+            throw new UnsupportedOperationException(BOOTSTRAP_CLASS + " has no doInit(List); the"
+                    + " engine predates 0.7.10 or changed its signature, so Mixin was never initialised");
         }
         method.invoke(null, args);
     }
