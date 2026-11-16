@@ -40,10 +40,14 @@ public final class MixinTweakShim {
     public static final String DETAIL_PROPERTY = "controlflex.mixin.tweak.detail";
 
     /**
-     * A resource only the mod's own jar carries. Used to find that jar by content instead of by file
-     * name -- pack authors rename jars, and a name pattern would quietly stop matching.
+     * The manifest attribute a mod sets when it wants to be loaded even though its own manifest
+     * declares {@code TweakClass} -- the same flag every Mixin platform agent reads before it
+     * force-loads such a jar.
+     *
+     * <p>This is the shim's whole opt-in contract: no mod is named anywhere in this class, so a jar
+     * that does not set it is left alone, and one that does is put back on the mod list.
      */
-    public static final String MOD_MARKER = "controlflex.mixins.json";
+    public static final String FORCE_LOAD_ATTRIBUTE = "ForceLoadAsMod";
 
     /**
      * FML's coremod manager. Its {@code getIgnoredMods()} list is the one place FML records "this jar
@@ -340,49 +344,121 @@ public final class MixinTweakShim {
     // ------------------------------------------------------------------------------------------
 
     /**
-     * Takes this jar and the mod jar off FML's ignored-mod list.
+     * Puts back on the mod list every ignored jar that asked to be loaded as a mod.
      *
      * <p><b>Why it happens here.</b> CoreModManager adds the FILE NAME of every jar that declares
      * {@code TweakClass} to {@code ignoredModFiles} the moment it reads that attribute. On a pack
      * with a provider nobody notices -- the provider's platform agent reads {@code ForceLoadAsMod}
-     * and force-loads such jars. With no provider there is nobody to do it, so a coremod that would
-     * normally undo it is never even instantiated: FML stops after "Loading tweaker" (measured
-     * 2026-11-16, this instance, no provider: no "Instantiating coremod class", then "Skipping known
-     * library file ...controlflex....jar" and the mod never constructs). The tweaker runs earlier
-     * than any coremod could, so this is the only place left.
+     * and force-loads such jars. With no provider nobody does it, and a coremod cannot: FML never
+     * instantiates it for such a jar (measured 2026-11-16: "Loading tweaker" then "Skipping known
+     * library file", no "Instantiating coremod class"). The tweaker runs earlier than any coremod
+     * could, so this is the only place left.
      *
-     * <p><b>Why the mod jar is found by content.</b> Pack authors rename jars; a name pattern would
-     * quietly stop matching. {@link #MOD_MARKER} is a resource only that jar carries.
+     * <p><b>Why it names no mod.</b> The rule is the ecosystem's own: a jar that sets
+     * {@code ForceLoadAsMod: true} wants to be a mod and is restored; everything else -- including
+     * this jar, which deliberately does not set it -- stays a library. Any mod that wants this
+     * behaviour opts in by declaring the attribute it would have needed anyway.
      */
     private static void unignoreModJars(ClassLoader loader) {
         try {
             Class<?> manager = Class.forName(FORGE_COREMOD_MANAGER, false, loader);
             Object value = manager.getMethod("getIgnoredMods").invoke(null);
             if (!(value instanceof List)) {
-                out("FML's ignored-mod list was not readable; the mod may not load, so its startup"
-                        + " screen may not appear");
+                out("FML's ignored-mod list was not readable; mods that declare TweakClass may not"
+                        + " load, so their startup screens may not appear");
                 return;
             }
             List<?> ignored = (List<?>) value;
-            String own = ownJarName();
-            String mod = findJarContaining(loader, MOD_MARKER);
-            int removed = 0;
-            if (removeEntry(ignored, own)) {
-                removed++;
+            // Copy first: the list is being mutated while it is walked, and it may be unmodifiable
+            // in a way that only shows up at remove() time.
+            List<Object> candidates = new java.util.ArrayList<Object>();
+            for (Object entry : ignored) {
+                candidates.add(entry);
             }
-            if (mod != null && !mod.equals(own) && removeEntry(ignored, mod)) {
-                removed++;
+            List<String> restored = new java.util.ArrayList<String>();
+            for (Object entry : candidates) {
+                if (!(entry instanceof String)) {
+                    continue;
+                }
+                String jarName = (String) entry;
+                java.io.File jar = findJar(loader, jarName);
+                if (jar == null || !declaresForceLoadAsMod(jar)) {
+                    continue;
+                }
+                if (removeEntry(ignored, jarName)) {
+                    restored.add(jarName);
+                }
             }
-            if (removed == 0) {
-                out("FML's ignored-mod list did not contain this jar or the mod jar; nothing to undo");
+            if (restored.isEmpty()) {
+                out("FML's known-library list held no jar declaring " + FORCE_LOAD_ATTRIBUTE
+                        + "; nothing to restore");
             } else {
-                out("removed " + removed + " entr" + (removed == 1 ? "y" : "ies") + " from FML's"
-                        + " known-library list (" + own + ", " + mod + ") so the mod can load and"
-                        + " explain itself");
+                out("restored " + restored.size() + " jar(s) from FML's known-library list ("
+                        + FORCE_LOAD_ATTRIBUTE + "): " + restored);
             }
         } catch (Throwable unavailable) {
-            out("could not undo FML's known-library mark (" + describe(unavailable) + "); the mod may"
-                    + " not load, so its startup screen may not appear");
+            out("could not undo FML's known-library marks (" + describe(unavailable) + "); mods that"
+                    + " declare TweakClass may not load, so their startup screens may not appear");
+        }
+    }
+
+    /** The jar on this loader's sources whose file name matches; null when it is not there. */
+    static java.io.File findJar(ClassLoader loader, String jarName) {
+        if (jarName == null || jarName.isEmpty()) {
+            return null;
+        }
+        try {
+            Object sources = loader.getClass().getMethod("getSources").invoke(loader);
+            if (!(sources instanceof List)) {
+                return null;
+            }
+            for (Object element : (List<?>) sources) {
+                if (!(element instanceof java.net.URL)) {
+                    continue;
+                }
+                java.net.URL url = (java.net.URL) element;
+                if (!"file".equals(url.getProtocol())) {
+                    continue;
+                }
+                java.io.File file = new java.io.File(url.toURI());
+                if (file.isFile() && jarName.equals(file.getName())) {
+                    return file;
+                }
+            }
+        } catch (Throwable unavailable) {
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Whether the jar asks to be loaded as a mod.
+     *
+     * <p>Read as a statement of intent, not a guess: {@code ForceLoadAsMod} is the attribute Forge's
+     * own coremod path and every Mixin platform agent already honour. A jar that does not set it
+     * stays a library, which is what the shim itself does.
+     */
+    static boolean declaresForceLoadAsMod(java.io.File jar) {
+        java.util.zip.ZipFile zip = null;
+        try {
+            zip = new java.util.zip.ZipFile(jar);
+            java.util.zip.ZipEntry entry = zip.getEntry("META-INF/MANIFEST.MF");
+            if (entry == null) {
+                return false;
+            }
+            java.util.jar.Manifest manifest = new java.util.jar.Manifest(zip.getInputStream(entry));
+            String value = manifest.getMainAttributes().getValue(FORCE_LOAD_ATTRIBUTE);
+            return value != null && "true".equalsIgnoreCase(value.trim());
+        } catch (Throwable unreadable) {
+            return false;
+        } finally {
+            if (zip != null) {
+                try {
+                    zip.close();
+                } catch (java.io.IOException ignored) {
+                    // a failed close on a jar we only read is not worth a line in the log
+                }
+            }
         }
     }
 
@@ -401,57 +477,7 @@ public final class MixinTweakShim {
         }
     }
 
-    /**
-     * The first jar on {@code loader}'s source list that contains {@code marker}, by file name.
-     *
-     * <p>Reflection rather than a cast: this class's constant pool must stay free of LaunchWrapper
-     * types so it can be unit-tested on a bare JVM.
-     */
-    static String findJarContaining(ClassLoader loader, String marker) {
-        try {
-            Object sources = loader.getClass().getMethod("getSources").invoke(loader);
-            if (!(sources instanceof List)) {
-                return null;
-            }
-            for (Object element : (List<?>) sources) {
-                if (!(element instanceof java.net.URL)) {
-                    continue;
-                }
-                java.net.URL url = (java.net.URL) element;
-                if (!"file".equals(url.getProtocol())) {
-                    continue;
-                }
-                java.io.File file = new java.io.File(url.toURI());
-                if (!file.isFile()) {
-                    continue;
-                }
-                if (hasEntry(file, marker)) {
-                    return file.getName();
-                }
-            }
-        } catch (Throwable unavailable) {
-            return null;
-        }
-        return null;
-    }
 
-    private static boolean hasEntry(java.io.File jar, String entry) {
-        java.util.zip.ZipFile zip = null;
-        try {
-            zip = new java.util.zip.ZipFile(jar);
-            return zip.getEntry(entry) != null;
-        } catch (Throwable unreadable) {
-            return false;
-        } finally {
-            if (zip != null) {
-                try {
-                    zip.close();
-                } catch (java.io.IOException ignored) {
-                    // nothing useful to do about a failed close on a jar we only read
-                }
-            }
-        }
-    }
 
     /** @return true when the entry was on the list and is now gone */
     static boolean removeEntry(List<?> ignored, String jarName) {

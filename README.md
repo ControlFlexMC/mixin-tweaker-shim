@@ -77,6 +77,24 @@ resolved on first call. What it cannot do is answer when the jar is not installe
 at all, which is why a mod that must work without this jar still reads the field
 itself.
 
+## Using it from another mod
+
+Declare both manifest attributes and do not bundle your own `MixinTweaker`:
+
+```
+TweakClass: org.spongepowered.asm.launch.MixinTweaker
+ForceLoadAsMod: true
+```
+
+`TweakClass` is what makes legacy providers read your `MixinConfigs`; `ForceLoadAsMod`
+is what tells FML (and this shim) that the jar is a mod rather than a library. On an
+instance with no provider, the shim restores every ignored jar that sets the second
+attribute, so your mod loads and can report the situation itself instead of vanishing
+from the mod list. A jar that sets only `TweakClass` stays a library -- this jar does.
+
+Nothing here names a mod, so the contract is stable: `ForceLoadAsMod` is an attribute
+you needed anyway to be force-loaded by a provider's agent.
+
 ## Building
 
 ```bash

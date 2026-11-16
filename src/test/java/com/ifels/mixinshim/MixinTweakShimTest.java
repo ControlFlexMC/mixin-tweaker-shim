@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -18,6 +21,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The shadow tweaker occupies a class name it does not own, so its behaviour has to be pinned
@@ -274,6 +278,33 @@ public class MixinTweakShimTest {
         assertEquals("0.8.7", MixinTweakShim.detectedVersion(),
                 "the detail text only carries the failure reason; without this the screen could not "
                         + "say which Mixin failed");
+    }
+
+
+    @Test
+    @DisplayName("the opt-in is read from the manifest, and a jar that does not set it is left alone")
+    void readsTheForceLoadOptIn(@TempDir Path dir) throws Exception {
+        assertTrue(MixinTweakShim.declaresForceLoadAsMod(writeJar(dir, "yes.jar", true)),
+                "ForceLoadAsMod is the attribute a mod would have needed anyway to be force-loaded "
+                        + "by a provider's agent; the shim honours the same statement of intent");
+        assertFalse(MixinTweakShim.declaresForceLoadAsMod(writeJar(dir, "no.jar", false)),
+                "no attribute means 'library'. This jar itself takes this branch.");
+        assertFalse(MixinTweakShim.declaresForceLoadAsMod(new File(dir.toFile(), "absent.jar")));
+    }
+
+    private static File writeJar(Path dir, String name, boolean forceLoad) throws Exception {
+        java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+        manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().putValue("TweakClass",
+                "org.spongepowered.asm.launch.MixinTweaker");
+        if (forceLoad) {
+            manifest.getMainAttributes().putValue("ForceLoadAsMod", "true");
+        }
+        File jar = dir.resolve(name).toFile();
+        java.util.jar.JarOutputStream out = new java.util.jar.JarOutputStream(
+                new FileOutputStream(jar), manifest);
+        out.close();
+        return jar;
     }
 
     @Test
