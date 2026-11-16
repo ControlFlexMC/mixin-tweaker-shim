@@ -215,6 +215,37 @@ public class MixinTweakShimTest {
     }
 
     @Test
+    @DisplayName("the caller can ask which Mixin this launch resolved, and null means none did")
+    void reportsTheDetectedVersion() {
+        assertNull(MixinTweakShim.detectedVersion(), "nothing has been probed yet");
+
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        assertEquals("0.8.7", MixinTweakShim.detectedVersion(),
+                "the same string the log line and the detail text carry, available without parsing");
+
+        MixinTweakShim.resetForTest();
+        MixinTweakShim.bindBootstrap("org.spongepowered.asm.launch.DoesNotExist");
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        assertNull(MixinTweakShim.detectedVersion(),
+                "no bootstrap means no version; null is distinct from the 'unknown' an engine "
+                        + "without a VERSION field would report");
+    }
+
+    @Test
+    @DisplayName("a failed start still leaves the version the shim was talking to")
+    void reportsTheVersionEvenWhenStartFails() {
+        MixinTweakShim.bindBootstrap(ThrowingStubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+
+        assertEquals(TweakState.START_FAILED, MixinTweakShim.currentState());
+        assertEquals("0.8.7", MixinTweakShim.detectedVersion(),
+                "the detail text only carries the failure reason; without this the screen could not "
+                        + "say which Mixin failed");
+    }
+
+    @Test
     @DisplayName("the shadow class itself is the jar's TweakClass entry point")
     void shadowTweakerForwardsToTheShim() {
         MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());

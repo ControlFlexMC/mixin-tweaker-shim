@@ -57,6 +57,18 @@ build fails if that number ever grows.
 No `mcmod.info`: this is a tweaker library, not a mod. Because it declares
 `TweakClass`, FML skips it as a "known library file" and never lists it as a mod.
 
+Asking which Mixin the launch resolved:
+
+```java
+MixinTweakShim.currentState();      // ABSENT / DELEGATED / ALREADY_BOOTED / START_FAILED / NOT_PROBED
+MixinTweakShim.detectedVersion();   // "0.8.7", "unknown", or null when there was no bootstrap
+MixinTweakShim.detail();            // the sentence that goes to the screen
+```
+
+`detectedVersion()` is for comparison, not for policy: a mod that wants the Mixin
+version has to read `MixinBootstrap.VERSION` itself, because this class is not
+loaded at all when a provider's own tweaker wins the classpath.
+
 ## Building
 
 ```bash

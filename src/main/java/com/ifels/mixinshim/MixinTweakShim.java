@@ -74,6 +74,12 @@ public final class MixinTweakShim {
         NOT_PROBED
     }
 
+    /**
+     * The Mixin version the last {@link #acceptOptions} resolved, or null when there was nothing to
+     * resolve. Read through {@link #detectedVersion()}.
+     */
+    private static String detectedVersion;
+
     /** Resolved once: log4j's Logger, or null when this JVM has no log4j. */
     private static Object logger;
 
@@ -113,6 +119,7 @@ public final class MixinTweakShim {
         started = false;
         delegated = false;
         initialisedByInitFallback = false;
+        detectedVersion = null;
         bootstrapClassName = BOOTSTRAP_CLASS;
         System.clearProperty(STATE_PROPERTY);
         System.clearProperty(DETAIL_PROPERTY);
@@ -134,6 +141,23 @@ public final class MixinTweakShim {
         } catch (IllegalArgumentException unknown) {
             return TweakState.NOT_PROBED;
         }
+    }
+
+    /**
+     * The Mixin version this launch resolved, or {@code null} when no bootstrap was found.
+     *
+     * <p><b>Why a getter and not a system property.</b> The value is process-local and only
+     * meaningful to code that already has this class loaded; a property would turn it into a global
+     * channel that anything could read or overwrite. {@code "unknown"} is a real answer -- it means
+     * the engine has no {@code VERSION} field -- and is distinct from {@code null} ("no bootstrap").
+     *
+     * <p><b>Not the mod's source of truth.</b> The mod reads {@code MixinBootstrap.VERSION} itself,
+     * because this class is not loaded at all when a provider's own tweaker wins the classpath. What
+     * this getter is for is comparison: a diagnostic that finds 0.8.2 here and 0.8.7 in the probe
+     * knows two Mixin copies are on the classpath.
+     */
+    public static String detectedVersion() {
+        return detectedVersion;
     }
 
     /** The reason behind {@link #currentState()}, or the empty string. Never null. */
@@ -164,6 +188,9 @@ public final class MixinTweakShim {
                     + " report this at startup instead of the launcher dying with a stack trace");
             return;
         }
+        // Recorded before start()/doInit(): a failure there still leaves the shim able to say which
+        // Mixin it was talking to, which the detail text alone does not.
+        detectedVersion = version(bootstrap);
         boolean alreadyBooted;
         try {
             // The real tweaker pops this boolean. It is false when a compatible subsystem is
