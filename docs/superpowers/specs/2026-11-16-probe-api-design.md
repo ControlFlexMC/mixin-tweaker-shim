@@ -40,6 +40,12 @@ shim 已经掌握了这些事实（它自己就在驱动 Mixin），但没有把
 
 容器存在的唯一理由是拿到 modid，让依赖声明成立。
 
+注解取值（都是"不要碍事"的方向）：
+
+- `acceptableRemoteVersions = "*"` —— 客户端/服务端版本不一致不该被拦，它两边都是启动期设施；
+- `acceptedMinecraftVersions = "[1.12.2]"` —— 这是 1.12.2 的构件，装到别的版本上明确拒绝，好过静默行为异常；
+- **不声明任何 `dependencies`** —— 它必须能在没有 provider 的实例上工作，写 `after:mixinbooter` 会把"可选"变成"看起来必需"。
+
 ### 5.2 必须声明 `ForceLoadAsMod: true`
 
 `required-after:` 是按 mod 列表校验的，所以本 jar 必须真的出现在列表里。它因此要声明自己那条规则所认的属性——**用自己的规矩约束自己**。
@@ -52,6 +58,8 @@ shim 已经掌握了这些事实（它自己就在驱动 Mixin），但没有把
 **移除条件必须放宽（实现时的判断）**：现在 `injectIntoClassLoader` 只在 `state == ABSENT` 时调用 `unignoreModJars`。但 `START_FAILED`（provider 在、`start()`/`doInit()` 抛异常）时既不 inject 也不 unignore，shim 就留在 ignored 表里，于是调用方的 `required-after` 先报**缺失依赖**，连降级页都出不来——这正是 §4 的反目标。
 
 改为：**只要没有成功 delegate（`ABSENT` 或 `START_FAILED`）就执行移除**。成功 delegate 时不动，因为那时 provider 的 agent 会处理。
+
+注意这条规则对本 jar **自己**同样适用：它声明了 `ForceLoadAsMod: true`，所以在无 provider 时它会把自己放回列表（这正是 `required-after` 需要的结果）。早期实现"移除自己"是因为当时它还不是 mod，规则换了之后这一步变成必要而非多余。
 
 ### 5.3 对外 API（三个查询）
 
@@ -73,7 +81,7 @@ MixinTweakShim.checkVersion("0.7.10");       // VersionCheck.AT_LEAST / BELOW / 
 
 `checkVersion` 只做比较，不缓存、不写属性、不影响 `TweakState`。
 
-### 5.5 依赖声明写在哪里（实现时的判断）
+### 5.4 依赖声明写在哪里（实现时的判断）
 
 **写在 `@Mod(dependencies = "required-after:mixintweakershim")`，不是 `mcmod.info`。**
 
@@ -81,9 +89,13 @@ MixinTweakShim.checkVersion("0.7.10");       // VersionCheck.AT_LEAST / BELOW / 
 
 `mcmod.info` 仍然保留，但只承担显示元数据（名字、描述、作者），不承担依赖语义。
 
-### 5.4 版本比较规则
+### 5.5 版本比较规则
 
-按点分段比较数值：`0.7.9 < 0.7.10`（不能按字符串比，字典序会得出相反结论）。段数不同时缺省为 0（`0.8 == 0.8.0`）。非数字段一律视为不可比 → `UNKNOWN`（**不是** `BELOW`）。
+按点分段比较数值：`0.7.9 < 0.7.10`（不能按字符串比，字典序会得出相反结论）。段数不同时缺省为 0（`0.8 == 0.8.0`）。
+
+**每段取前导数字**，因此 `0.8.2-SNAPSHOT` 解析为 `{0,8,2}`，与 `0.8.2` 相等。这一步是必要的：Mixin 的 `VERSION` 在实测中出现过 `"0.8"`、`"0.8.1"`、`"0.6.15"`、`"0.7.11"` 等形态，若把带后缀的整段判为不可比，一个 `-SNAPSHOT` 构建会让所有调用方都拿到 `UNKNOWN`。
+
+只有**某段完全没有前导数字**（如 `"dev"`、`""`）才返回 `UNKNOWN`（**不是** `BELOW`）。门槛参数本身非法（null、空串、无数字段）同样返回 `UNKNOWN`，不抛异常。
 
 ## 6. 构建影响
 
@@ -91,6 +103,7 @@ MixinTweakShim.checkVersion("0.7.10");       // VersionCheck.AT_LEAST / BELOW / 
 - 这是本仓库**第一次依赖 Forge**；tweak 阶段的两个类**仍然不得**引用任何 Minecraft 类型，这条约束不变，门禁也不会因为多了容器类而放宽对 `org/` 的检查。
 - `verifyShimJar` 从"恰好 3 个 class"改为"恰好这 5 个，逐一点名"：`MixinTweaker`、`MixinTweakShim`、`MixinTweakShim$TweakState`、`MixinTweakShim$VersionCheck`、`MixinShimMod`。多一个少一个都失败。
 - jar 名与版本不变（`mixin-tweaker-shim-0.9.0.jar`）。
+- **`mcmod.info` 必须是模板**，版本用 `${version}` 从 `build.gradle` 展开（`processResources`）。手写死 `0.9.0` 会造成两处版本漂移——而这个 jar 已经因为版本号改过一次，知道它会漂。
 
 ## 7. 交付的文档
 
@@ -103,12 +116,13 @@ README 增补"从别的模组依赖它"一节：`@Mod(dependencies = ...)` 写�
 
 单测：版本比较的边界（`0.7.9` vs `0.7.10`、`0.8` vs `0.8.0`、`unknown`、`null`、非数字段）、三个查询互不影响。
 
-真机三格：
+真机五格（前两格必测，其余按成本取舍）：
 
 1. **无 provider + shim + 调用方**：shim 出现在 mod 列表，调用方拿到 `ABSENT`/`null`；
 2. **有 provider + shim + 调用方**：provider 的 agent 把 shim force-load，`required-after` 成立，版本可读；
 3. **只装调用方（漏装 shim），有 provider**：FML 报缺失依赖并拒绝启动——这是选 B 换来的行为。
-4. **只装调用方（漏装 shim），无 provider**：仍然是矩阵 #2 那个 `ClassNotFoundException`，因为 LaunchWrapper 在 Forge 之前就死了，根本到不了依赖检查。**这两个格必须分开测**，否则 README 里那句"没装会被启动器拦住"会被误读成无条件成立。
+4. **专用服务端 + shim + provider**：容器不因 `acceptableRemoteVersions` 被拦，`required-after` 同样成立（这条只需一次启动确认，不逐 provider 铺开）。
+5. **只装调用方（漏装 shim），无 provider**：仍然是矩阵 #2 那个 `ClassNotFoundException`，因为 LaunchWrapper 在 Forge 之前就死了，根本到不了依赖检查。**这两个格必须分开测**，否则 README 里那句"没装会被启动器拦住"会被误读成无条件成立。
 
 ## 9. 留给实现者的空间
 
