@@ -60,10 +60,15 @@ No `mcmod.info`: this is a tweaker library, not a mod. Because it declares
 Asking which Mixin the launch resolved:
 
 ```java
+MixinTweakShim.hasMixinRuntime();   // is there a MixinBootstrap to drive?
 MixinTweakShim.currentState();      // ABSENT / DELEGATED / ALREADY_BOOTED / START_FAILED / NOT_PROBED
 MixinTweakShim.detectedVersion();   // "0.8.7", "unknown", or null when there was no bootstrap
 MixinTweakShim.detail();            // the sentence that goes to the screen
 ```
+
+`hasMixinRuntime()` checks for `MixinBootstrap` without initialising it. That is
+not the same question the mod's probe asks (`MixinEnvironment` loads), and the two
+can disagree in a malformed install; each is right for its own caller.
 
 `detectedVersion()` answers the same thing a direct read of
 `MixinBootstrap.VERSION` would, including when the shim never drove the tweak

@@ -144,6 +144,24 @@ public final class MixinTweakShim {
     }
 
     /**
+     * Whether this shim has a Mixin engine to drive in this launch.
+     *
+     * <p>True means {@code MixinBootstrap} is visible to the launch class loader -- the same object
+     * {@link #acceptOptions} would drive and {@link #detectedVersion()} would read. Checking it does
+     * not initialise the class, so asking before the tweak phase is safe.
+     *
+     * <p><b>Not the probe's signal.</b> The mod's startup probe asks whether
+     * {@code MixinEnvironment} loads, because its question is "is Mixin running". This one asks
+     * "is there a bootstrap I can drive", and the two can disagree in a malformed install (a jar
+     * with the API but no launch-side bootstrap). When they do, this method is the honest answer for
+     * code that intends to drive Mixin, and the probe's is the honest answer for code that intends
+     * to use it.
+     */
+    public static boolean hasMixinRuntime() {
+        return resolve(MixinTweakShim.class.getClassLoader()) != null;
+    }
+
+    /**
      * The Mixin version this launch has, or {@code null} when there is no bootstrap at all.
      *
      * <p>When the shim drove the tweak phase this is what it saw; when it did not (a provider's own

@@ -98,6 +98,19 @@ public class MixinTweakShimTest {
     }
 
     @Test
+    @DisplayName("hasMixinRuntime answers presence without initialising anything")
+    void hasMixinRuntimeIsAPresenceCheck() {
+        MixinTweakShim.bindBootstrap("org.spongepowered.asm.launch.DoesNotExist");
+        assertFalse(MixinTweakShim.hasMixinRuntime(), "nothing to drive");
+
+        MixinTweakShim.bindBootstrap(ProbeOnlyStubMixinBootstrap.class.getName());
+        assertTrue(MixinTweakShim.hasMixinRuntime(), "the same check acceptOptions would run");
+        assertEquals(0, StubCalls.probeClinitCount,
+                "asking whether it is there must not boot it: a <clinit> failure at this point would "
+                        + "poison the class for the whole launch");
+    }
+
+    @Test
     @DisplayName("probing for the bootstrap must not initialise it")
     void resolutionDoesNotInitialiseTheBootstrap() {
         MixinTweakShim.bindBootstrap(ProbeOnlyStubMixinBootstrap.class.getName());
