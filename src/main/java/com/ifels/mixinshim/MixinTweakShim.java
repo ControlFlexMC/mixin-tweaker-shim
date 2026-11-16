@@ -206,11 +206,22 @@ public final class MixinTweakShim {
         if (invokeStatic(bootstrap, "inject")) {
             return;
         }
-        Object platform = platform(bootstrap);
-        if (platform != null && invoke(platform, "inject")) {
+        // Mixin 0.6.x has no inject(): the entry point is injectIntoClassLoader(LaunchClassLoader),
+        // on the bootstrap and on the platform manager. Measured with javap on 0.6.15.
+        if (invokeWithLoader(bootstrap, "injectIntoClassLoader", loader)) {
             return;
         }
-        out("MixinBootstrap.inject() was not callable; the platform manager was not injected");
+        Object platform = platform(bootstrap);
+        if (platform != null) {
+            if (invoke(platform, "inject")) {
+                return;
+            }
+            if (invokeWithLoader(platform, "injectIntoClassLoader", loader)) {
+                return;
+            }
+        }
+        out("neither inject() nor injectIntoClassLoader(LaunchClassLoader) was callable;"
+                + " the platform manager was not injected");
     }
 
     /** The launcher half: the platform's launch target, or {@code null} to let Forge's tweaker win. */
@@ -446,6 +457,33 @@ public final class MixinTweakShim {
             return method;
         } catch (Throwable absent) {
             return null;
+        }
+    }
+
+
+    /**
+     * Calls a loader-taking injection entry point, if the owner has one and {@code loader} really is
+     * a {@code LaunchClassLoader}.
+     *
+     * <p>Reflection on the parameter type keeps LaunchWrapper out of this class's constant pool --
+     * the same reason the platform calls are reflective -- while still matching the exact signature
+     * the older engines declare.
+     */
+    private static boolean invokeWithLoader(Object owner, String name, ClassLoader loader) {
+        try {
+            Class<?> loaderType = Class.forName("net.minecraft.launchwrapper.LaunchClassLoader",
+                    false, loader);
+            if (!loaderType.isInstance(loader)) {
+                return false;
+            }
+            Method method = findDeclared(owner.getClass(), name, loaderType);
+            if (method == null) {
+                return false;
+            }
+            method.invoke(owner, loader);
+            return true;
+        } catch (Throwable unreachable) {
+            return false;
         }
     }
 
