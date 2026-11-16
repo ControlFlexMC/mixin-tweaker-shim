@@ -48,3 +48,64 @@ jar {
         attributes('TweakClass': 'org.spongepowered.asm.launch.MixinTweaker')
     }
 }
+
+// ---------------------------------------------------------------------------
+// The shape gate: three class files, one manifest attribute, nothing else.
+//
+// WHY THIS EXISTS. This jar is reviewed as "a library that squats someone else's
+// class name". That argument only survives while the squat is exactly one class.
+// The moment a fourth class appears -- an accidental dependency, a helper, a
+// shaded library -- the jar stops being auditable at a glance and starts looking
+// like the thing it is trying not to look like.
+// ---------------------------------------------------------------------------
+tasks.register('verifyShimJar') {
+    group = 'verification'
+    description = 'Fails when the shim jar carries anything beyond the three classes it must.'
+    dependsOn tasks.named('jar')
+    def artifact = tasks.named('jar').flatMap { it.archiveFile }
+    inputs.file(artifact).withPropertyName('shimJar')
+    doLast {
+        def file = artifact.get().asFile
+        def tweaker = 'org/spongepowered/asm/launch/MixinTweaker.class'
+        new java.util.zip.ZipFile(file).withCloseable { zip ->
+            def classes = zip.entries().findAll { it.name.endsWith('.class') }*.name
+            if (!classes.contains(tweaker)) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} does not contain ${tweaker}, " +
+                        "so its TweakClass attribute names a class the jar cannot supply.")
+            }
+            def foreign = classes.findAll { it.startsWith('org/') && it != tweaker }
+            if (foreign) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} ships classes under org/ " +
+                        "that it does not own: ${foreign.take(10)} (${foreign.size()} total).")
+            }
+            if (classes.size() != 3) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} has ${classes.size()} class " +
+                        "files, expected 3 (the tweaker, the shim, and its TweakState enum). " +
+                        "Found: ${classes.sort()}")
+            }
+            if (zip.getEntry('mcmod.info') != null) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} carries mcmod.info. " +
+                        "This is a tweaker library, not a mod; FML would list it in the mod list.")
+            }
+            def entry = zip.getEntry('META-INF/MANIFEST.MF')
+            if (entry == null) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} has no manifest")
+            }
+            def attributes = new java.util.jar.Manifest(zip.getInputStream(entry)).getMainAttributes()
+            if (attributes.getValue('TweakClass') != 'org.spongepowered.asm.launch.MixinTweaker') {
+                throw new GradleException("SHIM GATE FAILED: TweakClass is " +
+                        "'${attributes.getValue('TweakClass')}', expected the literal Mixin name.")
+            }
+            ['MixinConfigs', 'FMLCorePlugin'].each { forbidden ->
+                if (attributes.getValue(forbidden) != null) {
+                    throw new GradleException("SHIM GATE FAILED: ${file.name} declares ${forbidden}; " +
+                            "this jar must only supply the tweaker, never register configs or plug in.")
+                }
+            }
+        }
+        logger.lifecycle('verifyShimJar: three classes, one TweakClass, nothing else')
+    }
+}
+
+tasks.named('check').configure { dependsOn 'verifyShimJar' }
+tasks.named('assemble').configure { dependsOn 'verifyShimJar' }
