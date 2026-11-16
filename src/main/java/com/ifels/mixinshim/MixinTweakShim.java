@@ -74,6 +74,12 @@ public final class MixinTweakShim {
         NOT_PROBED
     }
 
+    /** Resolved once: log4j's Logger, or null when this JVM has no log4j. */
+    private static Object logger;
+
+    /** Guards the one-time lookup in {@link #logger()}. */
+    private static boolean loggerResolved;
+
     /** Overridable so the test can point the same reflection path at a stub. */
     private static String bootstrapClassName = BOOTSTRAP_CLASS;
 
@@ -585,8 +591,60 @@ public final class MixinTweakShim {
         }
     }
 
-    /** stdout, not a logger: this runs before the mod and must not drag mod classes in. */
+    /**
+     * Logs through log4j, which is what FML and every 1.12.2 launcher already route to the console
+     * and to {@code logs/latest.log}.
+     *
+     * <p><b>Why reflection.</b> This jar advertises no dependencies: it is loaded before the game and
+     * must survive an environment that has no log4j at all (the unit tests run on a bare JVM). The
+     * logger is looked up once, reflectively, and if anything about that fails the message goes to
+     * stdout instead -- still captured by FML's appender, just without a level or logger name.
+     *
+     * <p><b>Why the catch is outside.</b> Printing diagnostics may never become the thing that
+     * breaks the launch. This method is called from catch blocks whose whole purpose is to keep the
+     * launch alive; a throwing {@code println} (stdout replaced or closed) would undo that.
+     */
     private static void out(String message) {
-        System.out.println("[ControlFlex] " + message);
+        if (logThroughLog4j("info", message)) {
+            return;
+        }
+        try {
+            System.out.println("[ControlFlex] " + message);
+        } catch (Throwable ignored) {
+            // Nowhere left to write. The state property still carries the reason to the mod.
+        }
+    }
+
+    /** @return true when log4j took the message */
+    private static boolean logThroughLog4j(String level, String message) {
+        try {
+            Object logger = logger();
+            if (logger == null) {
+                return false;
+            }
+            Class<?> api = Class.forName("org.apache.logging.log4j.Logger", false,
+                    MixinTweakShim.class.getClassLoader());
+            java.lang.reflect.Method method = api.getMethod(level, String.class);
+            method.invoke(logger, message);
+            return true;
+        } catch (Throwable unavailable) {
+            return false;
+        }
+    }
+
+    /** The log4j logger, resolved once; null when this JVM has none. */
+    private static Object logger() {
+        if (loggerResolved) {
+            return logger;
+        }
+        loggerResolved = true;
+        try {
+            Class<?> manager = Class.forName("org.apache.logging.log4j.LogManager", false,
+                    MixinTweakShim.class.getClassLoader());
+            logger = manager.getMethod("getLogger", String.class).invoke(null, "ControlFlex");
+        } catch (Throwable unavailable) {
+            logger = null;
+        }
+        return logger;
     }
 }
