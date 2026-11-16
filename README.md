@@ -65,9 +65,12 @@ MixinTweakShim.detectedVersion();   // "0.8.7", "unknown", or null when there wa
 MixinTweakShim.detail();            // the sentence that goes to the screen
 ```
 
-`detectedVersion()` is for comparison, not for policy: a mod that wants the Mixin
-version has to read `MixinBootstrap.VERSION` itself, because this class is not
-loaded at all when a provider's own tweaker wins the classpath.
+`detectedVersion()` answers the same thing a direct read of
+`MixinBootstrap.VERSION` would, including when the shim never drove the tweak
+phase: in that case (a provider's own tweaker won the classpath) the value is
+resolved on first call. What it cannot do is answer when the jar is not installed
+at all, which is why a mod that must work without this jar still reads the field
+itself.
 
 ## Building
 

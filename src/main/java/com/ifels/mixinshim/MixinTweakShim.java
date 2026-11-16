@@ -144,7 +144,12 @@ public final class MixinTweakShim {
     }
 
     /**
-     * The Mixin version this launch resolved, or {@code null} when no bootstrap was found.
+     * The Mixin version this launch has, or {@code null} when there is no bootstrap at all.
+     *
+     * <p>When the shim drove the tweak phase this is what it saw; when it did not (a provider's own
+     * {@code MixinTweaker} won the classpath, so {@link #acceptOptions} never ran) the value is
+     * resolved on first call. Either way it equals a direct read of {@code MixinBootstrap.VERSION}:
+     * an API that answered differently from the field it reports would be a trap.
      *
      * <p><b>Why a getter and not a system property.</b> The value is process-local and only
      * meaningful to code that already has this class loaded; a property would turn it into a global
@@ -157,6 +162,16 @@ public final class MixinTweakShim {
      * knows two Mixin copies are on the classpath.
      */
     public static String detectedVersion() {
+        if (detectedVersion == null) {
+            // Nobody drove the tweak phase from here -- typically a provider's own MixinTweaker won
+            // the classpath, so acceptOptions never ran. Answer from the engine itself rather than
+            // reporting "unknown": an API that disagrees with a direct reflection of the same field
+            // is a worse API than one that lazily asks.
+            Class<?> bootstrap = resolve(MixinTweakShim.class.getClassLoader());
+            if (bootstrap != null) {
+                detectedVersion = version(bootstrap);
+            }
+        }
         return detectedVersion;
     }
 

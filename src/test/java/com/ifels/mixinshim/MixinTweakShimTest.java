@@ -215,6 +215,24 @@ public class MixinTweakShimTest {
     }
 
     @Test
+    @DisplayName("asked before the tweak phase, the API still answers the same as reflection")
+    void answersWithoutHavingDrivenTheTweakPhase() {
+        // The common real case: a provider's own MixinTweaker won the classpath, so acceptOptions
+        // never ran. The API must not answer null here -- that would disagree with the field it
+        // claims to report, and callers would stop trusting it.
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+
+        assertEquals("0.8.7", MixinTweakShim.detectedVersion());
+        assertEquals(TweakState.NOT_PROBED, MixinTweakShim.currentState(),
+                "answering the version does not pretend the tweak phase ran");
+
+        MixinTweakShim.resetForTest();
+        MixinTweakShim.bindBootstrap("org.spongepowered.asm.launch.DoesNotExist");
+        assertNull(MixinTweakShim.detectedVersion(),
+                "no bootstrap is still null, lazily or not");
+    }
+
+    @Test
     @DisplayName("the caller can ask which Mixin this launch resolved, and null means none did")
     void reportsTheDetectedVersion() {
         assertNull(MixinTweakShim.detectedVersion(), "nothing has been probed yet");
