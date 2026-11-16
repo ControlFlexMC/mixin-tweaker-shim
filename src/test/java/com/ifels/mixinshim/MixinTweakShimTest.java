@@ -1,0 +1,182 @@
+package com.ifels.mixinshim;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import com.ifels.mixinshim.MixinTweakShim.TweakState;
+
+import net.minecraft.launchwrapper.ITweaker;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The shadow tweaker occupies a class name it does not own, so its behaviour has to be pinned
+ * exactly.
+ *
+ * <p>Two properties matter:
+ *
+ * <ul>
+ *   <li><b>With a provider present it must be invisible.</b> The provider's own {@code MixinTweaker}
+ *       normally wins the classpath, but when ours does not, ours has to drive {@code MixinBootstrap}
+ *       through the very same four calls in the very same order -- a shim that only called
+ *       {@code init()} would silently drop the launcher's {@code --mixin} arguments.</li>
+ *   <li><b>With no provider it must not throw.</b> An exception in the tweak phase has no error
+ *       screen behind it, which is the exact failure this class exists to remove: the launch has to
+ *       reach Forge, where the mod's own probe turns the missing runtime into a readable page.</li>
+ * </ul>
+ *
+ * <p>The loader is passed explicitly (rather than read from {@code Launch}) so the same reflection
+ * path is exercised against a stub bootstrap, and so this test needs no launch environment at all.
+ */
+public class MixinTweakShimTest {
+
+    private static final ClassLoader LOADER = MixinTweakShimTest.class.getClassLoader();
+
+    @BeforeEach
+    void setUp() {
+        MixinTweakShim.resetForTest();
+        StubCalls.reset();
+    }
+
+    @AfterEach
+    void tearDown() {
+        MixinTweakShim.resetForTest();
+        StubCalls.reset();
+    }
+
+    @Test
+    @DisplayName("a provider is driven in the real tweaker's order: start, doInit, then inject")
+    void delegatesInTheRealTweakersOrder() {
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+        List<String> args = Arrays.asList("--username", "Dev");
+
+        MixinTweakShim.acceptOptions(args, LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+
+        assertEquals(Arrays.asList("start", "doInit", "inject"), StubCalls.calls,
+                "the order is the contract: doInit before start throws, and inject() before start "
+                        + "leaves Mixin uninitialised");
+        assertEquals(TweakState.DELEGATED, MixinTweakShim.currentState());
+        assertTrue(MixinTweakShim.detail().contains("0.8.7"),
+                "the log has to name which Mixin the launch actually uses");
+    }
+
+    @Test
+    @DisplayName("the launch target comes from the provider's platform, not from us")
+    void delegatesTheLaunchTarget() {
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+
+        assertEquals("net.minecraft.launchwrapper.Launch", MixinTweakShim.getLaunchTarget(LOADER),
+                "returning null here would silently hand the launch to whichever tweaker comes next");
+    }
+
+    @Test
+    @DisplayName("no provider: no exception, a recorded ABSENT state, and a readable reason")
+    void missingProviderIsRecordedNotThrown() {
+        MixinTweakShim.bindBootstrap("org.spongepowered.asm.launch.DoesNotExist");
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+        String target = MixinTweakShim.getLaunchTarget(LOADER);
+
+        assertEquals(TweakState.ABSENT, MixinTweakShim.currentState());
+        assertNull(target, "without a provider there is no launch target to return");
+        assertFalse(MixinTweakShim.detail().isEmpty(),
+                "the probe puts this text on the error screen; an empty detail would say nothing");
+        assertTrue(StubCalls.calls.isEmpty(), "nothing may be called on a bootstrap that is not there");
+    }
+
+    @Test
+    @DisplayName("probing for the bootstrap must not initialise it")
+    void resolutionDoesNotInitialiseTheBootstrap() {
+        MixinTweakShim.bindBootstrap(ProbeOnlyStubMixinBootstrap.class.getName());
+
+        assertTrue(MixinTweakShim.isBootstrapVisible(LOADER));
+        assertEquals(0, StubCalls.probeClinitCount,
+                "Class.forName(name, false, loader) is the contract: MixinBootstrap's <clinit> boots "
+                        + "the service, and a failure there poisons the class for the entire launch");
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        assertEquals(1, StubCalls.probeClinitCount, "start() is what initialises it, exactly once");
+    }
+
+    @Test
+    @DisplayName("start() returning false means a compatible subsystem is already up, not a failure")
+    void startFalseMeansAlreadyBooted() {
+        MixinTweakShim.bindBootstrap(FalseStubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+
+        assertEquals(TweakState.ALREADY_BOOTED, MixinTweakShim.currentState());
+        assertEquals(Arrays.asList("start", "doInit", "inject"), StubCalls.calls,
+                "MixinBooter 5.0's real tweaker pops start()'s boolean and calls doInit anyway; "
+                        + "dropping doInit here leaves every mixin silently dead");
+    }
+
+    @Test
+    @DisplayName("a start() that throws is still a recorded failure, and inject() is skipped")
+    void throwingStartIsRecorded() {
+        MixinTweakShim.bindBootstrap(ThrowingStubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+
+        assertEquals(TweakState.START_FAILED, MixinTweakShim.currentState());
+        assertTrue(MixinTweakShim.detail().contains("start"), "the reason has to survive to the screen");
+        assertFalse(StubCalls.calls.contains("inject"),
+                "injecting into a service that never started cannot work");
+    }
+
+    @Test
+    @DisplayName("acceptOptions is idempotent: a second call does not restart Mixin")
+    void acceptOptionsIsIdempotent() {
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+
+        assertEquals(Collections.singletonList("start"),
+                StubCalls.calls.subList(0, 1), "the second call must not start the service again");
+        assertEquals(2, StubCalls.calls.size(), "start and doInit, nothing else");
+    }
+
+    @Test
+    @DisplayName("package-private entry points are delegated to, not replaced by init()")
+    void delegatesPackagePrivateEntryPoints() {
+        MixinTweakShim.bindBootstrap(
+                com.ifels.mixinshim.support.PackagePrivateStubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+
+        assertEquals(Arrays.asList("start", "doInit", "inject"), StubCalls.calls,
+                "every real provider declares these package-private; getMethod would fall back to init()");
+    }
+
+    @Test
+    @DisplayName("the shadow class itself is the jar's TweakClass entry point")
+    void shadowTweakerForwardsToTheShim() {
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+
+        // The very class the manifest names; if it ever stops implementing ITweaker or stops
+        // forwarding, LaunchWrapper cannot load the jar at all.
+        ITweaker tweaker = new org.spongepowered.asm.launch.MixinTweaker();
+        tweaker.acceptOptions(Collections.<String>emptyList(), null, null, null);
+
+        assertNotNull(tweaker.getLaunchTarget());
+        assertEquals(TweakState.DELEGATED, MixinTweakShim.currentState());
+        assertTrue(StubCalls.calls.contains("start"));
+    }
+}

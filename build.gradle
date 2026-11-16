@@ -29,6 +29,8 @@ dependencies {
     // ITweaker / LaunchClassLoader only -- never packaged, never loaded by this jar at runtime
     // beyond what the launcher already provides.
     compileOnly 'net.minecraft:launchwrapper:1.12'
+    // The tests instantiate the forwarder, so they need ITweaker on the test classpath as well.
+    testImplementation 'net.minecraft:launchwrapper:1.12'
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
