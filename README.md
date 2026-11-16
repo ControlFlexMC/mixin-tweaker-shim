@@ -95,6 +95,25 @@ from the mod list. A jar that sets only `TweakClass` stays a library -- this jar
 Nothing here names a mod, so the contract is stable: `ForceLoadAsMod` is an attribute
 you needed anyway to be force-loaded by a provider's agent.
 
+## A note on sharing
+
+This jar is meant to be installed **once**, next to everything that needs it.
+
+- **Never bundle a copy** inside another mod. `org.spongepowered.asm.launch.MixinTweaker` can
+  only be supplied by one jar: LaunchWrapper resolves it by name, the first copy on the classpath
+  wins, and the loser's behaviour disappears without a word. Two copies also means two different
+  un-ignore rules running, or none.
+- **Never shade or relocate it.** The whole point is the binary name; a relocated copy is a
+  different class that no provider will recognise.
+- **The opt-in will not change meaning.** `ForceLoadAsMod` keeps meaning "this jar is a mod", and
+  a jar that sets only `TweakClass` keeps meaning "library". New queries and new attributes may be
+  added; a breaking change would arrive as a new artifact, not as a new meaning for an old name.
+- **It provides no Mixin.** Without a provider, mixins still do not apply. What it buys is a
+  launch that happens and a mod that can explain itself, instead of a `ClassNotFoundException`
+  before the window exists.
+- **It never throws.** Every failure is logged and recorded; this jar must not become the reason a
+  launch dies.
+
 ## Building
 
 ```bash
