@@ -111,7 +111,8 @@ ForceLoadAsMod: true
 is what tells FML (and this shim) that the jar is a mod rather than a library. On an
 instance with no provider, the shim restores every ignored jar that sets the second
 attribute, so your mod loads and can report the situation itself instead of vanishing
-from the mod list. A jar that sets only `TweakClass` stays a library -- this jar does.
+from the mod list. A jar that sets only `TweakClass` stays a library. This jar used to be that jar; it no longer is
+-- it declares the attribute too, because dependents check its modid.
 
 
 Two different things happen when a player installs your mod but not this jar, and
@@ -159,8 +160,8 @@ rules out JDK 8 (the flag is javac 9+), and Gradle 8.1.1 refuses to run on
 anything newer than 19, so 17 is the practical choice; the script finds one
 rather than making every caller remember. Override with `JAVA_HOME`.
 
-`gradle build` runs `verifyShimJar`, which fails the build if the jar carries
-anything but the three classes, an `org/` class other than the tweaker,
+`gradle build` runs `verifyShimJar`, which fails the build unless the jar carries
+exactly the five named classes, an `org/` class other than the tweaker,
 `mcmod.info`, or a config/plugin manifest attribute.
 
 ## Status

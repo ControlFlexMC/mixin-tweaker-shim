@@ -27,3 +27,6 @@ bin/
 
 # Local machine configuration
 local.properties
+
+# gradle test writes logs/ via launchwrapper log4j2
+logs/

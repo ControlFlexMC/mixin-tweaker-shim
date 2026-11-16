@@ -375,5 +375,9 @@ public class MixinTweakShimTest {
         assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion(null));
         assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion(""));
         assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion("dev"));
+        // "split" on a string of dots yields an empty array, which would compare as 0.0.0 and
+        // answer AT_LEAST for every real version -- the one shape that slipped past the other cases.
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion("."));
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion(".."));
     }
 }

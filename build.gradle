@@ -128,6 +128,40 @@ tasks.register('verifyShimJar') {
                 throw new GradleException("SHIM GATE FAILED: TweakClass is " +
                         "'${attributes.getValue('TweakClass')}', expected the literal Mixin name.")
             }
+            // The two invariants this version added, guarded here because both fail silently in
+            // production: without the attribute the jar never reaches the mod list, and a template
+            // that failed to expand ships someone else's version number.
+            if (attributes.getValue('ForceLoadAsMod') != 'true') {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} does not declare " +
+                        "ForceLoadAsMod: true. Provider agents read it to force-load this jar, and " +
+                        "the shim itself reads it to restore other jars; without it the jar stays a " +
+                        "known library and every dependent's required-after fails at launch.")
+            }
+            def metadata = zip.getEntry('mcmod.info')
+            def metadataText = metadata == null ? '' : zip.getInputStream(metadata).getText('UTF-8')
+            if (metadata != null) {
+                if (!metadataText.contains('"modid": "mixintweakershim"') &&
+                        !metadataText.contains('"modid":"mixintweakershim"')) {
+                    throw new GradleException("SHIM GATE FAILED: ${file.name} mcmod.info does not " +
+                            "declare modid mixintweakershim; dependents cannot resolve it.")
+                }
+                if (!metadataText.contains("\"version\": \"${project.version}\"")) {
+                    throw new GradleException("SHIM GATE FAILED: ${file.name} mcmod.info version is " +
+                            "not ${project.version} -- the \${version} template probably did not " +
+                            "expand. Contents: ${metadataText.take(200)}")
+                }
+            }
+            // The tweak phase runs before Forge exists. A forge type in either of those classes
+            // would compile now that the annotation dependency is on the classpath, then die with
+            // NoClassDefFoundError on exactly the instances this jar exists for.
+            ['org/spongepowered/asm/launch/MixinTweaker.class',
+             'com/ifels/mixinshim/MixinTweakShim.class'].each { tweak ->
+                def bytes = zip.getInputStream(zip.getEntry(tweak)).bytes
+                if (new String(bytes, 'ISO-8859-1').contains('net/minecraftforge/')) {
+                    throw new GradleException("SHIM GATE FAILED: ${tweak} references " +
+                            "net/minecraftforge, which does not exist yet when the tweak phase runs.")
+                }
+            }
             ['MixinConfigs', 'FMLCorePlugin'].each { forbidden ->
                 if (attributes.getValue(forbidden) != null) {
                     throw new GradleException("SHIM GATE FAILED: ${file.name} declares ${forbidden}; " +

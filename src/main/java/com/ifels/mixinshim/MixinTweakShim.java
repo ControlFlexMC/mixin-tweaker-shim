@@ -110,8 +110,13 @@ public final class MixinTweakShim {
     private MixinTweakShim() {
     }
 
-    /** @param name the bootstrap class to drive, or {@code null} to restore the real one */
-    public static void bindBootstrap(String name) {
+    /**
+     * Points the shim at a different bootstrap class. Package-private on purpose: it exists for the
+     * tests, and a public setter would let any code on the classpath change what this jar reports.
+     *
+     * @param name the bootstrap class to drive, or {@code null} to restore the real one
+     */
+    static void bindBootstrap(String name) {
         bootstrapClassName = name == null ? BOOTSTRAP_CLASS : name;
     }
 
@@ -246,6 +251,11 @@ public final class MixinTweakShim {
             return null;
         }
         String[] parts = trimmed.split("\\.");
+        if (parts.length == 0 || trimmed.charAt(0) == '.') {
+            // "." and ".." split to an empty array, which would compare as 0.0.0 and answer
+            // AT_LEAST against every real version. Not a version, so not a comparison.
+            return null;
+        }
         int[] parsed = new int[parts.length];
         for (int index = 0; index < parts.length; index++) {
             String part = parts[index];
@@ -423,8 +433,8 @@ public final class MixinTweakShim {
      *
      * <p><b>Why it names no mod.</b> The rule is the ecosystem's own: a jar that sets
      * {@code ForceLoadAsMod: true} wants to be a mod and is restored; everything else -- including
-     * this jar, which deliberately does not set it -- stays a library. Any mod that wants this
-     * behaviour opts in by declaring the attribute it would have needed anyway.
+     * this jar, which now sets it because dependents check its modid -- stays a library. Any mod
+     * that wants this behaviour opts in by declaring the attribute it would have needed anyway.
      */
     private static void unignoreModJars(ClassLoader loader) {
         try {
