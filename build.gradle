@@ -1,8 +1,9 @@
 // The tweaker shim: one class the manifest must name, one class that does the work.
 //
-// It is deliberately NOT a Java agent, NOT a mixin provider and NOT a mod. It has no
-// mcmod.info, so FML never lists it; it declares TweakClass, so FML skips it as a "known
-// library file" instead of complaining.
+// It is NOT a Java agent and NOT a mixin provider. It IS a mod, on purpose: other mods write
+// `required-after:mixintweakershim`, which FML can only check against the mod list, so this jar
+// has to be in that list. It gets there by declaring ForceLoadAsMod -- the same attribute it
+// reads when it restores other mods from FML's known-library list.
 plugins {
     id 'java-library'
 }
@@ -15,6 +16,11 @@ repositories {
     maven {
         name = 'Mojang'
         url = 'https://libraries.minecraft.net/'
+    }
+    // Only for the @Mod annotation; nothing from here is packaged or loaded at runtime by us.
+    maven {
+        name = 'Forge'
+        url = 'https://maven.minecraftforge.net/'
     }
     mavenCentral()
 }
@@ -31,10 +37,21 @@ dependencies {
     compileOnly 'net.minecraft:launchwrapper:1.12'
     // The tests instantiate the forwarder, so they need ITweaker on the test classpath as well.
     testImplementation 'net.minecraft:launchwrapper:1.12'
+    // The container's annotation is the public contract, so the test asserts on it.
+    compileOnly('net.minecraftforge:forge:1.12.2-14.23.5.2859:universal') { transitive = false }
+    testImplementation('net.minecraftforge:forge:1.12.2-14.23.5.2859:universal') { transitive = false }
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// One source of truth for the version: build.gradle. mcmod.info is a template.
+tasks.named('processResources') {
+    inputs.property('version', project.version)
+    filesMatching('mcmod.info') {
+        expand('version': project.version)
+    }
 }
 
 tasks.named('test') {
@@ -46,6 +63,9 @@ jar {
         // The one attribute this jar exists for. Mixin's classpath scan matches the value
         // literally, and LaunchWrapper resolves the class before Forge constructs anything.
         attributes('TweakClass': 'org.spongepowered.asm.launch.MixinTweaker')
+        // Says "I am a mod, do not skip me as a library". The shim itself reads this attribute when
+        // it restores other jars, and provider platform agents read it when they force-load.
+        attributes('ForceLoadAsMod': 'true')
     }
 }
 
@@ -85,6 +105,7 @@ tasks.register('verifyShimJar') {
                     'com/ifels/mixinshim/MixinTweakShim.class',
                     'com/ifels/mixinshim/MixinTweakShim$TweakState.class',
                     'com/ifels/mixinshim/MixinTweakShim$VersionCheck.class',
+                    'com/ifels/mixinshim/MixinShimMod.class',
             ]
             def unexpected = classes.findAll { !expected.contains(it) }
             def missing = expected.findAll { !classes.contains(it) }
@@ -93,9 +114,10 @@ tasks.register('verifyShimJar') {
                         "Unexpected: ${unexpected.sort()}; missing: ${missing.sort()}. " +
                         "Expected exactly: ${expected.sort()}")
             }
-            if (zip.getEntry('mcmod.info') != null) {
-                throw new GradleException("SHIM GATE FAILED: ${file.name} carries mcmod.info. " +
-                        "This is a tweaker library, not a mod; FML would list it in the mod list.")
+            if (zip.getEntry('mcmod.info') == null) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} has no mcmod.info. " +
+                        "Other mods depend on this jar by modid, and a jar that is not in the mod " +
+                        "list makes their required-after fail at launch.")
             }
             def entry = zip.getEntry('META-INF/MANIFEST.MF')
             if (entry == null) {

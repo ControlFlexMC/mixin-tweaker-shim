@@ -1,0 +1,10 @@
+[
+  {
+    "modid": "mixintweakershim",
+    "name": "Mixin Tweaker Shim",
+    "description": "Supplies the Mixin tweaker class name on instances with no provider, and answers which Mixin a launch actually got.",
+    "version": "${version}",
+    "mcversion": "1.12.2",
+    "authorList": ["ControlFlexMC"]
+  }
+]

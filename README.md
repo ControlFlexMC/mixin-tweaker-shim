@@ -44,18 +44,22 @@ in a degraded mode with its controller input disabled and a guidance page.
 
 ```
 mixin-tweaker-shim-0.9.0.jar
-├── META-INF/MANIFEST.MF                                # TweakClass only
-├── org/spongepowered/asm/launch/MixinTweaker.class     # ITweaker, pure forwarder
-├── com/ifels/mixinshim/MixinTweakShim.class            # logic, reflection only
-└── com/ifels/mixinshim/MixinTweakShim$TweakState.class # diagnostics enum
+├── META-INF/MANIFEST.MF                                  # TweakClass + ForceLoadAsMod
+├── mcmod.info                                            # modid: mixintweakershim
+├── org/spongepowered/asm/launch/MixinTweaker.class       # ITweaker, pure forwarder
+├── com/ifels/mixinshim/MixinTweakShim.class              # logic, reflection only
+├── com/ifels/mixinshim/MixinTweakShim$TweakState.class   # state enum
+├── com/ifels/mixinshim/MixinTweakShim$VersionCheck.class # at-least / below / unknown
+└── com/ifels/mixinshim/MixinShimMod.class                # @Mod container, identity only
 ```
 
 The only class outside the project's own package is the one the manifest must
-name. It holds no logic; every method forwards. Three class files in total — the
-build fails if that number ever grows.
+name. It holds no logic; every method forwards. Five class files, named one by one
+in the build's gate -- a class swapped for another fails the build.
 
-No `mcmod.info`: this is a tweaker library, not a mod. Because it declares
-`TweakClass`, FML skips it as a "known library file" and never lists it as a mod.
+It **is** a mod, deliberately: `required-after:mixintweakershim` is checked against
+the mod list, so the jar has to be in that list. Seeing "Mixin Tweaker Shim" in the
+mod list is expected, not a sign that something went wrong.
 
 Asking which Mixin the launch resolved:
 
@@ -63,8 +67,13 @@ Asking which Mixin the launch resolved:
 MixinTweakShim.hasMixinRuntime();   // is there a MixinBootstrap to drive?
 MixinTweakShim.currentState();      // ABSENT / DELEGATED / ALREADY_BOOTED / START_FAILED / NOT_PROBED
 MixinTweakShim.detectedVersion();   // "0.8.7", "unknown", or null when there was no bootstrap
+MixinTweakShim.checkVersion("0.7.10"); // VersionCheck.AT_LEAST / BELOW / UNKNOWN
 MixinTweakShim.detail();            // the sentence that goes to the screen
 ```
+
+`checkVersion` is three-valued because "readable but too old" and "not readable"
+are different facts: 0.7-era engines have no `VERSION` field at all, and turning
+that into `false` would tell a player to upgrade something that is fine.
 
 `hasMixinRuntime()` checks for `MixinBootstrap` without initialising it. That is
 not the same question the mod's probe asks (`MixinEnvironment` loads), and the two
@@ -79,7 +88,19 @@ itself.
 
 ## Using it from another mod
 
-Declare both manifest attributes and do not bundle your own `MixinTweaker`:
+Depend on it from your own container, and do not bundle your own `MixinTweaker`:
+
+```java
+@Mod(modid = "mymod", dependencies = "required-after:mixintweakershim")
+public final class MyMod { }
+```
+
+The dependency belongs in the annotation, not in `mcmod.info`: 1.12.2 only reads
+`mcmod.info` dependencies when that file also sets
+`"useDependencyInformation": true`, and a dependency FML never reads is worse than
+none -- you find out at runtime instead of at launch.
+
+Your own manifest still needs both attributes:
 
 ```
 TweakClass: org.spongepowered.asm.launch.MixinTweaker
@@ -91,6 +112,17 @@ is what tells FML (and this shim) that the jar is a mod rather than a library. O
 instance with no provider, the shim restores every ignored jar that sets the second
 attribute, so your mod loads and can report the situation itself instead of vanishing
 from the mod list. A jar that sets only `TweakClass` stays a library -- this jar does.
+
+
+Two different things happen when a player installs your mod but not this jar, and
+they are worth telling apart in your own documentation:
+
+- **with a Mixin provider installed** -- FML refuses the launch and names the
+  missing dependency, because `required-after` is checked against the mod list;
+- **with no provider at all** -- the launch dies earlier, with the original
+  `ClassNotFoundException` for the tweaker class, before FML gets a say.
+
+The second case is why this jar exists; the first is why it is a mod.
 
 Nothing here names a mod, so the contract is stable: `ForceLoadAsMod` is an attribute
 you needed anyway to be force-loaded by a provider's agent.

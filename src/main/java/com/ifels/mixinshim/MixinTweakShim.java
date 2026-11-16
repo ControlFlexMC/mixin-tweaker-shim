@@ -330,11 +330,10 @@ public final class MixinTweakShim {
     /** The class-loader half: {@code MixinBootstrap.inject()}, exactly as the real tweaker does. */
     public static void injectIntoClassLoader(ClassLoader loader) {
         if (!delegated) {
-            if (currentState() == TweakState.ABSENT) {
-                // Runs after FML filled its ignored-mod list (the list does not exist yet when
-                // acceptOptions is called) and before ModDiscoverer reads it.
-                unignoreModJars(loader);
-            }
+            // ABSENT or START_FAILED: nobody successfully took over, so nothing else will restore
+            // the jars FML marked as libraries -- including this one, which other mods depend on by
+            // modid. Runs after FML filled the list and before ModDiscoverer reads it.
+            unignoreModJars(loader);
             return;
         }
         Class<?> bootstrap = resolve(loader);
