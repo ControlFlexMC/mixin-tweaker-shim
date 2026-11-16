@@ -199,6 +199,22 @@ public class MixinTweakShimTest {
     }
 
     @Test
+    @DisplayName("an inject() that throws stops the chain: no second entry point, no exception")
+    void throwingInjectStopsTheChain() {
+        MixinTweakShim.bindBootstrap(ThrowingInjectStubMixinBootstrap.class.getName());
+
+        MixinTweakShim.acceptOptions(Collections.<String>emptyList(), LOADER);
+        MixinTweakShim.injectIntoClassLoader(LOADER);
+
+        assertTrue(StubCalls.calls.contains("inject"), "the first entry point has to be tried");
+        assertFalse(StubCalls.calls.contains("platform.inject"),
+                "trying another entry point after one threw risks injecting twice; the shim must"
+                        + " stop and report instead");
+        assertEquals(TweakState.DELEGATED, MixinTweakShim.currentState(),
+                "the tweak phase succeeded; only the injection failed, and that is logged, not thrown");
+    }
+
+    @Test
     @DisplayName("the shadow class itself is the jar's TweakClass entry point")
     void shadowTweakerForwardsToTheShim() {
         MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());

@@ -203,25 +203,50 @@ public final class MixinTweakShim {
         if (bootstrap == null) {
             return;
         }
-        if (invokeStatic(bootstrap, "inject")) {
+        // Each entry point is tried only until one answers. A method that is ABSENT means "this
+        // engine has a different shape" and the next one is tried; a method that THREW means the
+        // engine's own injection failed, and trying another entry point after that risks injecting
+        // twice -- so it stops, records the reason and returns.
+        Call call = invokeStatic(bootstrap, "inject");
+        if (call == Call.DONE) {
+            return;
+        }
+        if (call == Call.THREW) {
+            out("MixinBootstrap.inject() threw (" + lastFailure + "); not trying other entry points");
             return;
         }
         // Mixin 0.6.x has no inject(): the entry point is injectIntoClassLoader(LaunchClassLoader),
         // on the bootstrap and on the platform manager. Measured with javap on 0.6.15.
-        if (invokeWithLoader(bootstrap, "injectIntoClassLoader", loader)) {
+        call = invokeWithLoader(bootstrap, "injectIntoClassLoader", loader);
+        if (call == Call.DONE) {
+            return;
+        }
+        if (call == Call.THREW) {
+            out("MixinBootstrap.injectIntoClassLoader() threw (" + lastFailure + ")");
             return;
         }
         Object platform = platform(bootstrap);
         if (platform != null) {
-            if (invoke(platform, "inject")) {
+            call = invoke(platform, "inject");
+            if (call == Call.DONE) {
                 return;
             }
-            if (invokeWithLoader(platform, "injectIntoClassLoader", loader)) {
+            if (call == Call.THREW) {
+                out("the platform manager's inject() threw (" + lastFailure + ")");
+                return;
+            }
+            call = invokeWithLoader(platform, "injectIntoClassLoader", loader);
+            if (call == Call.DONE) {
+                return;
+            }
+            if (call == Call.THREW) {
+                out("the platform manager's injectIntoClassLoader() threw (" + lastFailure + ")");
                 return;
             }
         }
-        out("neither inject() nor injectIntoClassLoader(LaunchClassLoader) was callable;"
-                + " the platform manager was not injected");
+        out("no injection entry point answered: MixinBootstrap has neither inject() nor"
+                + " injectIntoClassLoader(LaunchClassLoader) on this engine, and neither does its"
+                + " platform manager -- nothing was injected");
     }
 
     /** The launcher half: the platform's launch target, or {@code null} to let Forge's tweaker win. */
@@ -427,16 +452,23 @@ public final class MixinTweakShim {
         }
     }
 
-    private static boolean invokeStatic(Class<?> owner, String name) {
+    /** What an optional call did. ABSENT is a shape difference; THREW is the engine failing. */
+    private enum Call { ABSENT, DONE, THREW }
+
+    /** Why the last call threw; set only for {@link Call#THREW}, read only for the log line. */
+    private static String lastFailure = "";
+
+    private static Call invokeStatic(Class<?> owner, String name) {
         Method method = findDeclared(owner, name);
         if (method == null) {
-            return false;
+            return Call.ABSENT;
         }
         try {
             method.invoke(null);
-            return true;
-        } catch (Throwable unreachable) {
-            return false;
+            return Call.DONE;
+        } catch (Throwable failed) {
+            lastFailure = describe(failed);
+            return Call.THREW;
         }
     }
 
@@ -469,32 +501,41 @@ public final class MixinTweakShim {
      * the same reason the platform calls are reflective -- while still matching the exact signature
      * the older engines declare.
      */
-    private static boolean invokeWithLoader(Object owner, String name, ClassLoader loader) {
+    private static Call invokeWithLoader(Object owner, String name, ClassLoader loader) {
+        Class<?> loaderType;
+        Method method;
         try {
-            Class<?> loaderType = Class.forName("net.minecraft.launchwrapper.LaunchClassLoader",
-                    false, loader);
+            loaderType = Class.forName("net.minecraft.launchwrapper.LaunchClassLoader", false, loader);
             if (!loaderType.isInstance(loader)) {
-                return false;
+                return Call.ABSENT;
             }
-            Method method = findDeclared(owner.getClass(), name, loaderType);
-            if (method == null) {
-                return false;
-            }
+            method = findDeclared(owner.getClass(), name, loaderType);
+        } catch (Throwable unavailable) {
+            return Call.ABSENT;
+        }
+        if (method == null) {
+            return Call.ABSENT;
+        }
+        try {
             method.invoke(owner, loader);
-            return true;
-        } catch (Throwable unreachable) {
-            return false;
+            return Call.DONE;
+        } catch (Throwable failed) {
+            lastFailure = describe(failed);
+            return Call.THREW;
         }
     }
 
-    private static boolean invoke(Object owner, String name) {
+    private static Call invoke(Object owner, String name) {
+        Method method = findDeclared(owner.getClass(), name);
+        if (method == null) {
+            return Call.ABSENT;
+        }
         try {
-            Method method = owner.getClass().getDeclaredMethod(name);
-            method.setAccessible(true);
             method.invoke(owner);
-            return true;
-        } catch (Throwable unreachable) {
-            return false;
+            return Call.DONE;
+        } catch (Throwable failed) {
+            lastFailure = describe(failed);
+            return Call.THREW;
         }
     }
 
