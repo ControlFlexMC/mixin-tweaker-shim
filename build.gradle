@@ -8,7 +8,7 @@ plugins {
 }
 
 group = 'com.ifels.mixinshim'
-version = '1.0.0'
+version = '0.9.0'
 
 repositories {
     // launchwrapper ships with the game, not on Maven Central.

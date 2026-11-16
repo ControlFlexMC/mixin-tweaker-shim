@@ -43,7 +43,7 @@ in a degraded mode with its controller input disabled and a guidance page.
 ## Contents
 
 ```
-mixin-tweaker-shim-1.0.0.jar
+mixin-tweaker-shim-0.9.0.jar
 ├── META-INF/MANIFEST.MF                                # TweakClass only
 ├── org/spongepowered/asm/launch/MixinTweaker.class     # ITweaker, pure forwarder
 ├── com/ifels/mixinshim/MixinTweakShim.class            # logic, reflection only
