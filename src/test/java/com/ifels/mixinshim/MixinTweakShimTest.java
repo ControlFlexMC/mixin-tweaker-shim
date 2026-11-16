@@ -166,6 +166,22 @@ public class MixinTweakShimTest {
     }
 
     @Test
+    @DisplayName("the ignored-mod entry is removed by value, and only when it is there")
+    void removesTheIgnoredModEntry() {
+        List<String> ignored = new java.util.ArrayList<String>(
+                Arrays.asList("jei.jar", "controlflex.jar"));
+
+        assertTrue(MixinTweakShim.removeEntry(ignored, "controlflex.jar"),
+                "FML keys the list by file name, so the removal has to match it exactly");
+        assertEquals(Arrays.asList("jei.jar"), ignored);
+
+        assertFalse(MixinTweakShim.removeEntry(ignored, "controlflex.jar"));
+        assertFalse(MixinTweakShim.removeEntry(null, "controlflex.jar"));
+        assertFalse(MixinTweakShim.removeEntry(ignored, ""));
+        assertFalse(MixinTweakShim.removeEntry(ignored, null));
+    }
+
+    @Test
     @DisplayName("the shadow class itself is the jar's TweakClass entry point")
     void shadowTweakerForwardsToTheShim() {
         MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
@@ -178,5 +194,13 @@ public class MixinTweakShimTest {
         assertNotNull(tweaker.getLaunchTarget());
         assertEquals(TweakState.DELEGATED, MixinTweakShim.currentState());
         assertTrue(StubCalls.calls.contains("start"));
+    }
+
+    @Test
+    @DisplayName("outside a jar there is no file name to un-ignore, and that is not an error")
+    void ownJarNameIsNullWhenRunningFromClasses() {
+        assertNull(MixinTweakShim.ownJarName(),
+                "the unit test runs from build/classes; the launch path must treat that as 'nothing"
+                        + " to remove' instead of guessing a name");
     }
 }

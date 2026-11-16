@@ -39,6 +39,20 @@ public final class MixinTweakShim {
     /** Free-text reason behind the state; surfaced on the error screen. */
     public static final String DETAIL_PROPERTY = "controlflex.mixin.tweak.detail";
 
+    /**
+     * A resource only the mod's own jar carries. Used to find that jar by content instead of by file
+     * name -- pack authors rename jars, and a name pattern would quietly stop matching.
+     */
+    public static final String MOD_MARKER = "controlflex.mixins.json";
+
+    /**
+     * FML's coremod manager. Its {@code getIgnoredMods()} list is the one place FML records "this jar
+     * is a tweaker/library, not a mod" -- and it is consulted twice, by {@code ModDiscoverer}
+     * ("Skipping known library file") and by {@code Loader#loadMods} ("Skipping already parsed
+     * coremod or tweaker").
+     */
+    private static final String FORGE_COREMOD_MANAGER = "net.minecraftforge.fml.relauncher.CoreModManager";
+
     /** What the tweak phase found. Deliberately tiny: supply/version logic lives in the mod probe. */
     public enum TweakState {
         /** No provider's bootstrap is visible from the launch class loader. */
@@ -169,6 +183,11 @@ public final class MixinTweakShim {
     /** The class-loader half: {@code MixinBootstrap.inject()}, exactly as the real tweaker does. */
     public static void injectIntoClassLoader(ClassLoader loader) {
         if (!delegated) {
+            if (currentState() == TweakState.ABSENT) {
+                // Runs after FML filled its ignored-mod list (the list does not exist yet when
+                // acceptOptions is called) and before ModDiscoverer reads it.
+                unignoreModJars(loader);
+            }
             return;
         }
         Class<?> bootstrap = resolve(loader);
@@ -203,6 +222,132 @@ public final class MixinTweakShim {
             out("could not read the platform launch target: " + unreachable);
             return null;
         }
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // FML's "this jar is a library, not a mod" list
+    // ------------------------------------------------------------------------------------------
+
+    /**
+     * Takes this jar and the mod jar off FML's ignored-mod list.
+     *
+     * <p><b>Why it happens here.</b> CoreModManager adds the FILE NAME of every jar that declares
+     * {@code TweakClass} to {@code ignoredModFiles} the moment it reads that attribute. On a pack
+     * with a provider nobody notices -- the provider's platform agent reads {@code ForceLoadAsMod}
+     * and force-loads such jars. With no provider there is nobody to do it, so a coremod that would
+     * normally undo it is never even instantiated: FML stops after "Loading tweaker" (measured
+     * 2026-11-16, this instance, no provider: no "Instantiating coremod class", then "Skipping known
+     * library file ...controlflex....jar" and the mod never constructs). The tweaker runs earlier
+     * than any coremod could, so this is the only place left.
+     *
+     * <p><b>Why the mod jar is found by content.</b> Pack authors rename jars; a name pattern would
+     * quietly stop matching. {@link #MOD_MARKER} is a resource only that jar carries.
+     */
+    private static void unignoreModJars(ClassLoader loader) {
+        try {
+            Class<?> manager = Class.forName(FORGE_COREMOD_MANAGER, false, loader);
+            Object value = manager.getMethod("getIgnoredMods").invoke(null);
+            if (!(value instanceof List)) {
+                out("FML's ignored-mod list was not readable; the mod may not load, so its startup"
+                        + " screen may not appear");
+                return;
+            }
+            List<?> ignored = (List<?>) value;
+            String own = ownJarName();
+            String mod = findJarContaining(loader, MOD_MARKER);
+            int removed = 0;
+            if (removeEntry(ignored, own)) {
+                removed++;
+            }
+            if (mod != null && !mod.equals(own) && removeEntry(ignored, mod)) {
+                removed++;
+            }
+            if (removed == 0) {
+                out("FML's ignored-mod list did not contain this jar or the mod jar; nothing to undo");
+            } else {
+                out("removed " + removed + " entr" + (removed == 1 ? "y" : "ies") + " from FML's"
+                        + " known-library list (" + own + ", " + mod + ") so the mod can load and"
+                        + " explain itself");
+            }
+        } catch (Throwable unavailable) {
+            out("could not undo FML's known-library mark (" + describe(unavailable) + "); the mod may"
+                    + " not load, so its startup screen may not appear");
+        }
+    }
+
+    /** The jar this class was loaded from; null when running from a directory (unit test, dev run). */
+    static String ownJarName() {
+        try {
+            CodeSource source = MixinTweakShim.class.getProtectionDomain().getCodeSource();
+            if (source == null || source.getLocation() == null) {
+                return null;
+            }
+            // toURI() decodes %20 and friends; getPath() would return the URL-encoded form.
+            java.io.File file = new java.io.File(source.getLocation().toURI());
+            return file.isFile() ? file.getName() : null;
+        } catch (Throwable unavailable) {
+            return null;
+        }
+    }
+
+    /**
+     * The first jar on {@code loader}'s source list that contains {@code marker}, by file name.
+     *
+     * <p>Reflection rather than a cast: this class's constant pool must stay free of LaunchWrapper
+     * types so it can be unit-tested on a bare JVM.
+     */
+    static String findJarContaining(ClassLoader loader, String marker) {
+        try {
+            Object sources = loader.getClass().getMethod("getSources").invoke(loader);
+            if (!(sources instanceof List)) {
+                return null;
+            }
+            for (Object element : (List<?>) sources) {
+                if (!(element instanceof java.net.URL)) {
+                    continue;
+                }
+                java.net.URL url = (java.net.URL) element;
+                if (!"file".equals(url.getProtocol())) {
+                    continue;
+                }
+                java.io.File file = new java.io.File(url.toURI());
+                if (!file.isFile()) {
+                    continue;
+                }
+                if (hasEntry(file, marker)) {
+                    return file.getName();
+                }
+            }
+        } catch (Throwable unavailable) {
+            return null;
+        }
+        return null;
+    }
+
+    private static boolean hasEntry(java.io.File jar, String entry) {
+        java.util.zip.ZipFile zip = null;
+        try {
+            zip = new java.util.zip.ZipFile(jar);
+            return zip.getEntry(entry) != null;
+        } catch (Throwable unreadable) {
+            return false;
+        } finally {
+            if (zip != null) {
+                try {
+                    zip.close();
+                } catch (java.io.IOException ignored) {
+                    // nothing useful to do about a failed close on a jar we only read
+                }
+            }
+        }
+    }
+
+    /** @return true when the entry was on the list and is now gone */
+    static boolean removeEntry(List<?> ignored, String jarName) {
+        if (ignored == null || jarName == null || jarName.isEmpty()) {
+            return false;
+        }
+        return ignored.remove(jarName);
     }
 
     // ------------------------------------------------------------------------------------------
