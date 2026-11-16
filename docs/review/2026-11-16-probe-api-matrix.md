@@ -37,9 +37,21 @@ Mod controlflex is missing the required element 'version' ... Falling back to me
 
 | 格 | 场景 | 原因 |
 |---|---|---|
-| 3 | 只装调用方、有 provider → FML 报缺失依赖 | 需要调用方先在 `@Mod(dependencies=...)` 里声明 `required-after:mixintweakershim`，属主仓库改动，不在本次范围 |
+| 3 | ~~只装调用方、有 provider → FML 报缺失依赖~~ | **已完成**，见下 |
 | 4 | 专用服务端 + shim + provider | 未启动服务端 |
 | 5 | 只装调用方、无 provider → CNFE | 已由早前矩阵 #2 覆盖（同一个 `ClassNotFoundException`），未重复执行 |
+
+## 格 3 —— 只装调用方、不装 shim、有 provider（5.0）：通过
+
+场景：`matrix.sh booter5`，`mods/` 里只有 `controlflex-0.9.0.0-mc1.12.2-forge.jar`。
+
+```
+net.minecraftforge.fml.common.MissingModsException: Mod controlflex (ControlFlex) requires [mixintweakershim]
+```
+
+`mod loaded` 计数 0，游戏未进入主菜单。FML 在依赖检查阶段就拦下，并**点名缺的是 `mixintweakershim`**。
+
+对照早前的矩阵 #2（无 provider、无 shim）：那一格是 LaunchWrapper 的 `ClassNotFoundException`，连 Forge 都没起来。两者是不同层次的失败，这里拿到的是更清晰的那个——也正是把依赖改成 `required-after` 换来的结果。
 
 ## 附加观察
 
