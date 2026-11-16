@@ -78,10 +78,20 @@ tasks.register('verifyShimJar') {
                 throw new GradleException("SHIM GATE FAILED: ${file.name} ships classes under org/ " +
                         "that it does not own: ${foreign.take(10)} (${foreign.size()} total).")
             }
-            if (classes.size() != 3) {
-                throw new GradleException("SHIM GATE FAILED: ${file.name} has ${classes.size()} class " +
-                        "files, expected 3 (the tweaker, the shim, and its TweakState enum). " +
-                        "Found: ${classes.sort()}")
+            // Named, not counted: the jar's audit story is "exactly these classes", and a bare
+            // number would let one be swapped for another without the gate noticing.
+            def expected = [
+                    'org/spongepowered/asm/launch/MixinTweaker.class',
+                    'com/ifels/mixinshim/MixinTweakShim.class',
+                    'com/ifels/mixinshim/MixinTweakShim$TweakState.class',
+                    'com/ifels/mixinshim/MixinTweakShim$VersionCheck.class',
+            ]
+            def unexpected = classes.findAll { !expected.contains(it) }
+            def missing = expected.findAll { !classes.contains(it) }
+            if (unexpected || missing) {
+                throw new GradleException("SHIM GATE FAILED: ${file.name} class set changed. " +
+                        "Unexpected: ${unexpected.sort()}; missing: ${missing.sort()}. " +
+                        "Expected exactly: ${expected.sort()}")
             }
             if (zip.getEntry('mcmod.info') != null) {
                 throw new GradleException("SHIM GATE FAILED: ${file.name} carries mcmod.info. " +

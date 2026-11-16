@@ -99,11 +99,9 @@ if [[ ! -f "${NEW_JAR}" ]]; then
     exit 1
 fi
 
+# The authority on the class set is verifyShimJar (which names each expected class); this only
+# reports the number so a reader does not have to open the jar to learn it.
 class_count=$(unzip -l "${NEW_JAR}" | grep -c '\.class$' || true)
-if [[ "${class_count}" -ne 3 ]]; then
-    echo "Class count is ${class_count}, expected 3 -- verifyShimJar should have stopped this."
-    exit 1
-fi
 
 echo ""
 echo "Build complete: $(basename "${NEW_JAR}") (${class_count} classes)"

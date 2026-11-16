@@ -329,4 +329,51 @@ public class MixinTweakShimTest {
                 "the unit test runs from build/classes; the launch path must treat that as 'nothing"
                         + " to remove' instead of guessing a name");
     }
+
+    @Test
+    @DisplayName("checkVersion compares numerically, not lexicographically")
+    void checkVersionComparesNumerically() {
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());   // VERSION = "0.8.7"
+
+        assertEquals(MixinTweakShim.VersionCheck.AT_LEAST, MixinTweakShim.checkVersion("0.7.10"),
+                "0.8.7 is above 0.7.10; a string comparison would say the opposite");
+        assertEquals(MixinTweakShim.VersionCheck.BELOW, MixinTweakShim.checkVersion("0.8.8"));
+        assertEquals(MixinTweakShim.VersionCheck.AT_LEAST, MixinTweakShim.checkVersion("0.8.7"));
+    }
+
+    @Test
+    @DisplayName("missing segments count as zero, so 0.8 equals 0.8.0")
+    void checkVersionPadsMissingSegments() {
+        MixinTweakShim.bindBootstrap(EightOnlyStubMixinBootstrap.class.getName());   // VERSION = "0.8"
+
+        assertEquals(MixinTweakShim.VersionCheck.AT_LEAST, MixinTweakShim.checkVersion("0.8.0"));
+        assertEquals(MixinTweakShim.VersionCheck.BELOW, MixinTweakShim.checkVersion("0.8.0.1"));
+    }
+
+    @Test
+    @DisplayName("a suffix after the digits does not make the version incomparable")
+    void checkVersionToleratesSuffixes() {
+        MixinTweakShim.bindBootstrap(SnapshotStubMixinBootstrap.class.getName());    // "0.8.2-SNAPSHOT"
+
+        assertEquals(MixinTweakShim.VersionCheck.AT_LEAST, MixinTweakShim.checkVersion("0.8.2"));
+        assertEquals(MixinTweakShim.VersionCheck.BELOW, MixinTweakShim.checkVersion("0.8.3"));
+    }
+
+    @Test
+    @DisplayName("unknown versions and invalid floors are UNKNOWN, never exceptions")
+    void checkVersionReturnsUnknownInsteadOfThrowing() {
+        MixinTweakShim.bindBootstrap("org.spongepowered.asm.launch.DoesNotExist");
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion("0.7.10"),
+                "no bootstrap means no version to compare");
+
+        MixinTweakShim.resetForTest();
+        MixinTweakShim.bindBootstrap(UnknownVersionStubMixinBootstrap.class.getName());  // "unknown"
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion("0.7.10"));
+
+        MixinTweakShim.resetForTest();
+        MixinTweakShim.bindBootstrap(StubMixinBootstrap.class.getName());
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion(null));
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion(""));
+        assertEquals(MixinTweakShim.VersionCheck.UNKNOWN, MixinTweakShim.checkVersion("dev"));
+    }
 }

@@ -197,6 +197,74 @@ public final class MixinTweakShim {
         return detectedVersion;
     }
 
+    /** Three answers, because "readable but below" and "not readable" are different facts. */
+    public enum VersionCheck {
+        /** Known version, at or above the floor. */
+        AT_LEAST,
+        /** Known version, below the floor. */
+        BELOW,
+        /** The version or the floor could not be read as numbers; nothing was compared. */
+        UNKNOWN
+    }
+
+    /**
+     * Compares the detected Mixin version against a floor.
+     *
+     * <p>Numeric per segment, so {@code 0.7.9 < 0.7.10} -- a string comparison says the opposite.
+     * Missing trailing segments count as zero, so {@code 0.8} equals {@code 0.8.0}. Each segment
+     * contributes its leading digits, which is what makes {@code 0.8.2-SNAPSHOT} comparable to
+     * {@code 0.8.2}; a segment with no leading digits makes the whole answer {@link
+     * VersionCheck#UNKNOWN} rather than {@code BELOW}.
+     *
+     * <p>Never throws: an invalid floor ({@code null}, empty, no digits) is the caller's bug, but
+     * turning it into an exception inside a launch phase would be a worse bug.
+     */
+    public static VersionCheck checkVersion(String floor) {
+        int[] actual = parseVersion(detectedVersion());
+        int[] required = parseVersion(floor);
+        if (actual == null || required == null) {
+            return VersionCheck.UNKNOWN;
+        }
+        int segments = Math.max(actual.length, required.length);
+        for (int index = 0; index < segments; index++) {
+            int mine = index < actual.length ? actual[index] : 0;
+            int theirs = index < required.length ? required[index] : 0;
+            if (mine != theirs) {
+                return mine > theirs ? VersionCheck.AT_LEAST : VersionCheck.BELOW;
+            }
+        }
+        return VersionCheck.AT_LEAST;
+    }
+
+    /** @return the leading-digits form of each segment, or null when it is not a version */
+    private static int[] parseVersion(String version) {
+        if (version == null) {
+            return null;
+        }
+        String trimmed = version.trim();
+        if (trimmed.isEmpty() || "unknown".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        String[] parts = trimmed.split("\\.");
+        int[] parsed = new int[parts.length];
+        for (int index = 0; index < parts.length; index++) {
+            String part = parts[index];
+            int digits = 0;
+            while (digits < part.length() && Character.isDigit(part.charAt(digits))) {
+                digits++;
+            }
+            if (digits == 0) {
+                return null;
+            }
+            try {
+                parsed[index] = Integer.parseInt(part.substring(0, digits));
+            } catch (NumberFormatException tooLarge) {
+                return null;
+            }
+        }
+        return parsed;
+    }
+
     /** The reason behind {@link #currentState()}, or the empty string. Never null. */
     public static String detail() {
         String raw = System.getProperty(DETAIL_PROPERTY);
