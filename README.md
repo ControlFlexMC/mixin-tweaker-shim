@@ -20,7 +20,7 @@ not an implementation of Mixin.
 ## Why this exists
 
 On 1.12.2, Mixin is not part of Forge — it arrives with a separate provider
-(MixinBooter, MixinBootstrap, MixinCompat, malisiscore). A mod that wants its
+(MixinBooter, MixinBootstrap, FermiumBooter, malisiscore). A mod that wants its
 mixin configs read by *every* provider generation has to declare
 `TweakClass: org.spongepowered.asm.launch.MixinTweaker`, because the pre-11
 providers match that manifest value literally when they decide which jars are

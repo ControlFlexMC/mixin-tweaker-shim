@@ -16,7 +16,7 @@ import net.minecraft.launchwrapper.LaunchClassLoader;
  * generation has to declare {@code TweakClass: org.spongepowered.asm.launch.MixinTweaker} in its
  * manifest. Mixin's classpath scan matches that value literally -- that is the only reason such a
  * jar is treated as a Mixin container and its {@code MixinConfigs} are read -- so the attribute
- * cannot be dropped without breaking registration on MixinBootstrap / MixinCompat / MixinBooter
+ * cannot be dropped without breaking registration on MixinBootstrap / FermiumBooter / MixinBooter
  * &lt; 11.0. LaunchWrapper resolves the class before Forge constructs any mod, so an instance with
  * no provider at all used to abort with {@code ClassNotFoundException} before the game window
  * existed: no Forge, no probe, no readable message. This class makes the name always resolvable
